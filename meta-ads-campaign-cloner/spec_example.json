@@ -1,0 +1,73 @@
+{
+  "_comment": "Example spec for run_clone.py. All IDs and paths are placeholders — replace with real values before running. Typically you build this file from the output of fetch_structure.py on a source campaign you want to clone, then change only the bits the user asked to change.",
+  "account_id": "act_0000000000000000",
+  "image_dir": "C:\\path\\to\\creatives\\folder",
+  "copy_substitutions": {
+    "old date": "new date"
+  },
+  "campaign": {
+    "name": "Example Campaign | New Webinar | DD.MM.YY",
+    "objective": "OUTCOME_LEADS",
+    "buying_type": "AUCTION",
+    "status": "PAUSED",
+    "lifetime_budget": "500000",
+    "bid_strategy": "LOWEST_COST_WITHOUT_CAP",
+    "special_ad_categories": []
+  },
+  "adsets": [
+    {
+      "name": "Broad audience | 30-55",
+      "status": "PAUSED",
+      "optimization_goal": "OFFSITE_CONVERSIONS",
+      "billing_event": "IMPRESSIONS",
+      "bid_strategy": "LOWEST_COST_WITHOUT_CAP",
+      "end_time": "2026-06-15T19:30:00+0300",
+      "targeting": {
+        "age_max": 55,
+        "age_min": 30,
+        "geo_locations": {
+          "countries": ["IL"],
+          "location_types": ["home", "recent"]
+        },
+        "brand_safety_content_filter_levels": [
+          "FACEBOOK_RELAXED",
+          "AN_RELAXED"
+        ],
+        "targeting_automation": {
+          "advantage_audience": 1,
+          "individual_setting": {
+            "age": 1,
+            "gender": 1
+          }
+        }
+      },
+      "promoted_object": {
+        "pixel_id": "0000000000000000",
+        "custom_event_type": "COMPLETE_REGISTRATION"
+      },
+      "destination_type": "UNDEFINED",
+      "ads": [
+        {
+          "name": "Image 1 | 4 copy variants",
+          "status": "PAUSED",
+          "creative": {
+            "file": "1.png",
+            "bodies": [
+              "Body copy variant 1 — replace with your actual ad text.",
+              "Body copy variant 2 — replace with your actual ad text.",
+              "Body copy variant 3 — replace with your actual ad text.",
+              "Body copy variant 4 — replace with your actual ad text."
+            ],
+            "titles": [
+              "Headline — replace with your actual headline >>"
+            ],
+            "page_id": "0000000000000000",
+            "instagram_user_id": "00000000000000000",
+            "link": "https://example.com/landing-page/",
+            "call_to_action": "SIGN_UP"
+          }
+        }
+      ]
+    }
+  ]
+}

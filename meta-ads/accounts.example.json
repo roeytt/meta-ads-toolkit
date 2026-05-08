@@ -1,0 +1,36 @@
+{
+  "_comment": "Optional config for users with multiple ad accounts. Rename to 'accounts.json' to activate. If you only have one account, you can skip this file entirely and rely on .env (META_ACCESS_TOKEN + META_AD_ACCOUNT_ID).",
+  "_instructions": [
+    "1. Replace placeholder tokens with real Meta access tokens (see references/setup.md)",
+    "2. Replace placeholder account IDs (format: act_<digits>, found via list_accounts.py)",
+    "3. Set 'aliases' to short names you'd naturally use in chat to refer to each account",
+    "4. NEVER commit this file with real values to a public git repository",
+    "5. Tokens and IDs below are EXAMPLES ONLY — they will not work"
+  ],
+
+  "tokens": {
+    "personal": "EAAB_REPLACE_WITH_YOUR_PERSONAL_TOKEN",
+    "business": "EAAB_REPLACE_WITH_YOUR_BUSINESS_TOKEN"
+  },
+
+  "accounts": [
+    {
+      "name": "Main Business",
+      "aliases": ["main", "ראשי", "business"],
+      "id": "act_0000000000000000",
+      "token": "business"
+    },
+    {
+      "name": "Personal Account",
+      "aliases": ["personal", "אישי", "שלי"],
+      "id": "act_1111111111111111",
+      "token": "personal"
+    },
+    {
+      "name": "Client A LLC",
+      "aliases": ["client a", "לקוח א"],
+      "id": "act_2222222222222222",
+      "token": "business"
+    }
+  ]
+}
