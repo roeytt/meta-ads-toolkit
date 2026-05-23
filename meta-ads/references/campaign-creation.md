@@ -104,8 +104,110 @@ Each ad inside an ad set uses the ad set's image.
 | `headline` | yes | Bold headline below the image. Keep under 40 characters for mobile. |
 | `description` | no | Small gray line below headline. Often cut by placements. |
 | `cta` | no | Default `LEARN_MORE`. Others: `SIGN_UP`, `SHOP_NOW`, `DOWNLOAD`, `GET_OFFER`, `GET_QUOTE`, `SUBSCRIBE`, `CONTACT_US`, `APPLY_NOW`, `WATCH_MORE`, `INSTALL_MOBILE_APP`, `USE_APP`, `MESSAGE_PAGE`, `WHATSAPP_MESSAGE`, `NO_BUTTON`. |
+| `image_path` | conditional | Per-ad primary image (4:5 or 1:1 recommended). Overrides the ad-set-level image. Required if the ad set has no `image_path`/`image_hash`. |
+| `secondary_image_path` | no | Path to a second image (9:16 recommended) for placement-specific delivery. When provided, the script switches from `object_story_spec` to `asset_feed_spec` and uploads both images. Meta automatically serves the primary image on Feed and the secondary image on Stories/Reels. Use this whenever you prepare separate assets for vertical placements — it guarantees correct framing instead of relying on Meta's auto-crop. |
+| `url` | no | Per-ad landing URL override. Use for UTM-tagged URLs unique to each creative. Falls back to the spec's top-level `landing_url`. |
 | `standard_enhancements` | no | Default `false` (opts out). Meta's auto-enhancements alter the creative — brightness, cropping, text overlays. Leave opt-out if you care about pixel-for-pixel fidelity. |
 | `status` | no | Default `PAUSED`. |
+
+#### Two-image workflow (4:5 + 9:16)
+
+When a campaign targets Advantage+ Placements (which includes both Feed and Stories/Reels), prepare two image files per ad and use both fields:
+
+```json
+{
+  "name": "my-ad",
+  "headline": "Your headline",
+  "message": "Body copy...",
+  "image_path": "/path/to/my-ad-4x5.png",
+  "secondary_image_path": "/path/to/my-ad-9x16.png",
+  "url": "https://example.com/?utm_content=my-ad",
+  "cta": "LEARN_MORE"
+}
+```
+
+The script uploads both files, then attempts an `asset_feed_spec` creative with `"ad_formats": ["SINGLE_IMAGE"]`. Meta matches each image to its optimal placement automatically — no manual step in Ads Manager required.
+
+**App permission required:** `asset_feed_spec` needs the Meta app to have the dynamic-creative capability enabled in Meta Business Manager. If the app lacks it, the script automatically falls back to `object_story_spec` (4:5 primary image only) and logs a warning. In fallback mode, Meta's Advantage+ Creative auto-adapts the 4:5 image for Stories/Reels placements. To unlock native multi-image creatives, grant the app the dynamic-creative capability: Business Manager → Apps → [your app] → Capabilities.
+
+Without `secondary_image_path`, the script always uses the original `object_story_spec` (single-image) path.
+
+## Carousel ads
+
+Use `carousel_cards` on the ad to create a multi-card carousel. Each card has its own image, headline, description, and URL.
+
+```json
+{
+  "name": "Carousel_WebinarAngles",
+  "message": "Primary text shown above the carousel — same for all cards.",
+  "cta": "LEARN_MORE",
+  "carousel_cards": [
+    {
+      "image_path": "./creative/card1.png",
+      "headline": "Card 1 — First benefit",
+      "description": "Short supporting line",
+      "url": "https://example.com/?card=1"
+    },
+    {
+      "image_path": "./creative/card2.png",
+      "headline": "Card 2 — Second benefit",
+      "description": "Short supporting line",
+      "url": "https://example.com/?card=2"
+    },
+    {
+      "image_path": "./creative/card3.png",
+      "headline": "Card 3 — Third benefit",
+      "url": "https://example.com/?card=3"
+    }
+  ]
+}
+```
+
+**Field reference for carousel_cards items:**
+
+| Field | Required | Notes |
+|---|---|---|
+| `image_path` | yes | Path to the card's image. Square (1:1) recommended for carousels. |
+| `headline` | yes | Bold text below each card. Keep under 40 characters. |
+| `description` | no | Small gray line below the headline. Often truncated on mobile. |
+| `url` | no | Per-card destination URL. Falls back to the ad-level `url` or spec-level `landing_url`. |
+
+**Optional carousel-level flags on the ad:**
+
+| Field | Default | Notes |
+|---|---|---|
+| `multi_share_optimized` | `true` | Meta re-orders cards by performance. Set `false` to lock card order. |
+| `multi_share_end_card` | `false` | Adds a final "See more at [Page]" card. Usually off for direct-response. |
+
+Minimum 2 cards, maximum 10.
+
+## Multiple body text and headlines (DCO)
+
+Use `messages` (list) and/or `headlines` (list) instead of the singular `message`/`headline` to enable Dynamic Creative Optimization. Meta automatically tests all combinations and surfaces the best-performing ones.
+
+```json
+{
+  "name": "Ad_DCO_Test",
+  "image_path": "./creative/main.png",
+  "messages": [
+    "First body text — problem angle. Multi-line supported.",
+    "Second body text — solution angle.",
+    "Third body text — social proof angle."
+  ],
+  "headlines": [
+    "Headline option A",
+    "Headline option B"
+  ],
+  "cta": "SIGN_UP",
+  "url": "https://example.com"
+}
+```
+
+Meta can test up to **5 body variants** and **5 headline variants** per ad (25 combinations max). More variants = more A/B signal, but requires sufficient impressions to be statistically meaningful.
+
+**DCO + two images:** Combine `messages`/`headlines` with `secondary_image_path` — the `asset_feed_spec` will include both images along with all text variants.
+
+**Fallback:** If the Meta app lacks the `dynamic-creative` capability, the script falls back to `object_story_spec` using the first message and first headline only. A warning is logged. To enable DCO natively, grant the app dynamic-creative capability in Meta Business Manager → Apps → Capabilities.
 
 ## Currency handling
 

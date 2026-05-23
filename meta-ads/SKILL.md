@@ -3,8 +3,6 @@ name: meta-ads
 description: Pull, analyze, manage, and CREATE Meta ads (Facebook, Instagram, Messenger, Threads, Click-to-WhatsApp) via the Marketing API. Use when the user mentions Meta/FB/IG ads, Ads Manager, ROAS, CPA, CPM, CTR, ad spend, campaign or ad set performance, creative fatigue, frequency, CTWA, audience/placement breakdowns, A/B ad tests, or wants to pause an ad, change a budget, duplicate a winner, or launch a new campaign from scratch. Trigger on Hebrew terms like פרסום בפייסבוק/באינסטגרם, פרסומות מטא, ביצועי קמפיין, פרסומות, צור קמפיין, השק קמפיין, A/B טסט. Trigger on questions like how are my ads doing, which creative is winning, is my ad fatigued, what's my CPA, drop a 30-day report, launch an A/B test for my course, build a campaign with these 3 angles. Trigger even if auth isn't set up — the skill walks through one-time setup. Do NOT use for organic Instagram analytics, Reels view counts on non-promoted posts, or organic Threads engagement; those need the Instagram Graph API.
 ---
 
-> Built by **Roey Treister** for the "Claude Code × Meta Ads" workshop. Hebrew quick-start: see [README.md](README.md).
-
 # Meta Ads (Marketing API)
 
 Pull ad performance data from Meta (Facebook, Instagram, Messenger, Click-to-WhatsApp, Threads), run analyses, and — with explicit confirmation — write changes back (pause, budget change, duplicate, full campaign creation with images and copy).
@@ -32,28 +30,25 @@ Meta's insights API only serves data from the last **37 months**. Any campaign o
 
 ## Account lookup — always use accounts.json
 
-If the user has multiple ad accounts (their own business + clients, or a personal account + a business account), they may pre-configure them in `accounts.json` (located at `~/.claude/skills/meta-ads/accounts.json`). The file is optional — if missing, fall back to the `.env` defaults.
+This user is a Meta Ads campaigner with multiple client accounts. All accounts and tokens are pre-configured in `accounts.json` (located at `~/.claude/skills/meta-ads/accounts.json`).
 
-When `accounts.json` exists:
+**NEVER ask the user for an account ID or token.** Instead:
 
 1. Read `accounts.json` at the start of every request
 2. Match the account name the user mentions (full, partial, or alias) — case-insensitive fuzzy match
 3. Use the `id` and `token` fields from the matched account for all API calls and script arguments
 4. If the user's mention is ambiguous (matches 2+ accounts), list the candidates and ask them to clarify
 
-**Matching examples (placeholder accounts — replace with your own):**
-- "main" or "ראשי" → Main Business Account (`act_XXXXXXXXX`, token: business)
-- "client a" or "לקוח א" → Client A LLC (`act_XXXXXXXXX`, token: client_a)
-- "personal" or "אישי" → Personal Account (`act_XXXXXXXXX`, token: personal)
+**Matching examples:**
+- "פלאזה" → Plaza Cafe TLV (`act_908919177509642`, token: business)
+- "חיליק" or "טרקטור" → הטרקטור של חיליק (`act_986644117007584`, token: business)
+- "אישי" or "שלי" or "רואי" → רואי טרייסטר (`act_3370722833063262`, token: personal)
+- "pilates" or "power house" → Power House Pilates (`act_3249220532011618`, token: business)
 
 When running scripts, pass the token as `META_ACCESS_TOKEN=<token>` env var and `--account-id <id>` flag:
 ```bash
 META_ACCESS_TOKEN=<token_value> python scripts/fetch_insights.py --account-id <act_id>
 ```
-
-If `accounts.json` is missing entirely, scripts read `META_ACCESS_TOKEN` and `META_AD_ACCOUNT_ID` directly from `.env` — that's the simpler single-account flow.
-
-**NEVER ask the user for an account ID or token if `accounts.json` is configured.** Always look it up first.
 
 ## Before anything else: check setup + discover accounts
 

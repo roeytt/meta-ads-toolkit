@@ -115,6 +115,19 @@ def upload_image(account_id: str, image_path: Path) -> str:
     return info["hash"]
 
 
+def is_carousel(ad_cfg: dict) -> bool:
+    """True if the ad has carousel_cards (multi-card format)."""
+    return bool(ad_cfg.get("carousel_cards"))
+
+
+def is_dco(ad_cfg: dict) -> bool:
+    """True if the ad has multiple messages or multiple headlines (Dynamic Creative)."""
+    return (
+        (isinstance(ad_cfg.get("messages"), list) and len(ad_cfg["messages"]) > 1)
+        or (isinstance(ad_cfg.get("headlines"), list) and len(ad_cfg["headlines"]) > 1)
+    )
+
+
 def build_targeting(t: dict, resolved_interests: list[dict]) -> dict:
     out = {}
 
@@ -143,22 +156,33 @@ def build_targeting(t: dict, resolved_interests: list[dict]) -> dict:
     if "genders" in t:
         out["genders"] = t["genders"]
 
-    # Interests via flexible_spec (AND of interest group + other criteria)
+    # Interests + behaviors via flexible_spec. Each is a separate OR'd entry so
+    # the audience matches (any listed interest) OR (any listed behavior).
+    flexible_spec = []
     if resolved_interests:
-        out["flexible_spec"] = [
+        flexible_spec.append(
             {"interests": [{"id": i["id"], "name": i["name"]} for i in resolved_interests]}
-        ]
-
-    # Placements
-    out["publisher_platforms"] = t.get("publisher_platforms", DEFAULT_PLACEMENTS["publisher_platforms"])
-    if "instagram" in out["publisher_platforms"]:
-        out["instagram_positions"] = t.get(
-            "instagram_positions", DEFAULT_PLACEMENTS["instagram_positions"]
         )
-    if "facebook" in out["publisher_platforms"]:
-        out["facebook_positions"] = t.get("facebook_positions", ["feed", "story", "video_feeds"])
+    behavior_ids = t.get("behavior_ids", [])
+    if behavior_ids:
+        flexible_spec.append({"behaviors": [{"id": bid} for bid in behavior_ids]})
+    if flexible_spec:
+        out["flexible_spec"] = flexible_spec
 
-    # Advantage+ audience expansion (default ON)
+    # Placements: omit publisher_platforms entirely when advantage_placements=True
+    # so Meta manages all placement decisions automatically.
+    if not t.get("advantage_placements", False):
+        out["publisher_platforms"] = t.get("publisher_platforms", DEFAULT_PLACEMENTS["publisher_platforms"])
+        if "instagram" in out["publisher_platforms"]:
+            out["instagram_positions"] = t.get(
+                "instagram_positions", DEFAULT_PLACEMENTS["instagram_positions"]
+            )
+        if "facebook" in out["publisher_platforms"]:
+            out["facebook_positions"] = t.get("facebook_positions", ["feed", "story", "video_feeds"])
+
+    # Advantage+ audience expansion.
+    # advantage_placements is achieved by omitting publisher_platforms (handled above).
+    # The API rejects "advantage_placements" inside targeting_automation — don't send it.
     if t.get("advantage_audience", True):
         out["targeting_automation"] = {"advantage_audience": 1}
 
@@ -207,9 +231,31 @@ def validate_spec(spec: dict) -> list[str]:
                 errs.append(f"{prefix}.image_path does not exist: {p}")
         for j, ad in enumerate(a.get("ads", [])):
             ap = f"{prefix}.ads[{j}]"
-            for f in ("name", "message", "headline"):
-                if not ad.get(f):
-                    errs.append(f"{ap}.{f} is required")
+            if not ad.get("name"):
+                errs.append(f"{ap}.name is required")
+            if is_carousel(ad):
+                cards = ad.get("carousel_cards", [])
+                if len(cards) < 2:
+                    errs.append(f"{ap}.carousel_cards must have at least 2 cards")
+                for k, card in enumerate(cards):
+                    cp = f"{ap}.carousel_cards[{k}]"
+                    if not card.get("image_path"):
+                        errs.append(f"{cp}.image_path is required")
+                    if not card.get("headline"):
+                        errs.append(f"{cp}.headline is required")
+                    if card.get("image_path"):
+                        p = Path(card["image_path"]).expanduser()
+                        if not p.is_absolute():
+                            p = (Path.cwd() / p).resolve()
+                        if not p.exists():
+                            errs.append(f"{cp}.image_path does not exist: {p}")
+            else:
+                has_message = ad.get("message") or (isinstance(ad.get("messages"), list) and ad["messages"])
+                has_headline = ad.get("headline") or (isinstance(ad.get("headlines"), list) and ad["headlines"])
+                if not has_message:
+                    errs.append(f"{ap}.message (or messages) is required")
+                if not has_headline:
+                    errs.append(f"{ap}.headline (or headlines) is required")
             cta = ad.get("cta", "LEARN_MORE")
             if cta not in VALID_CTAS:
                 errs.append(f"{ap}.cta '{cta}' is not a recognized CTA type")
@@ -219,7 +265,48 @@ def validate_spec(spec: dict) -> list[str]:
                     p = (Path.cwd() / p).resolve()
                 if not p.exists():
                     errs.append(f"{ap}.image_path does not exist: {p}")
+            if ad.get("secondary_image_path"):
+                p = Path(ad["secondary_image_path"]).expanduser()
+                if not p.is_absolute():
+                    p = (Path.cwd() / p).resolve()
+                if not p.exists():
+                    errs.append(f"{ap}.secondary_image_path does not exist: {p}")
     return errs
+
+
+def _plan_ad(ad: dict, default_url: str | None) -> dict:
+    """Summarise a single ad for the dry-run plan output."""
+    if is_carousel(ad):
+        return {
+            "name": ad["name"],
+            "creative_format": "CAROUSEL",
+            "message_preview": (ad.get("message") or "")[:100],
+            "cta": ad.get("cta", "LEARN_MORE"),
+            "cards": [
+                {
+                    "headline": c["headline"],
+                    "image": c["image_path"],
+                    "url": c.get("url") or default_url,
+                    "description": c.get("description"),
+                }
+                for c in ad.get("carousel_cards", [])
+            ],
+        }
+    messages = ad.get("messages") or [ad.get("message", "")]
+    headlines = ad.get("headlines") or [ad.get("headline", "")]
+    fmt = "DCO (asset_feed_spec)" if (len(messages) > 1 or len(headlines) > 1) else "SINGLE_IMAGE (object_story_spec)"
+    if ad.get("secondary_image_path"):
+        fmt = "TWO_IMAGE (asset_feed_spec)"
+    return {
+        "name": ad["name"],
+        "creative_format": fmt,
+        "headlines": headlines,
+        "message_previews": [m.split("\n", 1)[0][:100] + " …" for m in messages],
+        "cta": ad.get("cta", "LEARN_MORE"),
+        "image": ad.get("image_path") or "<adset_image>",
+        "image_9x16": ad.get("secondary_image_path") or None,
+        "url": ad.get("url") or default_url,
+    }
 
 
 # ─── Planning (dry-run) ────────────────────────────────────────────────────
@@ -273,17 +360,7 @@ def plan(spec: dict, account_id: str) -> dict:
                     ),
                 },
                 "image": a.get("image_path") or f"<prehashed:{a.get('image_hash')}>",
-                "ads": [
-                    {
-                        "name": ad["name"],
-                        "headline": ad["headline"],
-                        "message_preview": ad["message"].split("\n", 1)[0][:100] + " …",
-                        "cta": ad.get("cta", "LEARN_MORE"),
-                        "image": ad.get("image_path") or "<adset_image>",
-                        "url": ad.get("url") or spec.get("landing_url"),
-                    }
-                    for ad in a["ads"]
-                ],
+                "ads": [_plan_ad(ad, spec.get("landing_url")) for ad in a["ads"]],
             }
         )
         total_ads += len(a["ads"])
@@ -377,6 +454,8 @@ def execute(spec: dict, account_id: str) -> dict:
             adset_data["end_time"] = a["end_time"]
         if "bid_amount" in a:
             adset_data["bid_amount"] = str(major_to_minor(a["bid_amount"], currency))
+        if "promoted_object" in a:
+            adset_data["promoted_object"] = json.dumps(a["promoted_object"])
 
         adset = post(f"{account_id}/adsets", data=adset_data)
         adset_id = adset["id"]
@@ -385,46 +464,139 @@ def execute(spec: dict, account_id: str) -> dict:
 
         ads_created = []
         for ad_cfg in a["ads"]:
-            # Per-ad image override (upload if present, else fall back to adset-level hash)
-            if ad_cfg.get("image_path"):
-                per_ad_img_path = Path(ad_cfg["image_path"]).expanduser()
-                if not per_ad_img_path.is_absolute():
-                    per_ad_img_path = (Path.cwd() / per_ad_img_path).resolve()
-                ad_image_hash = upload_image(account_id, per_ad_img_path)
-                state["objects"].append({"type": "image", "hash": ad_image_hash, "file": per_ad_img_path.name})
-                print(f"[+] image: {per_ad_img_path.name} -> {ad_image_hash[:16]}…", file=sys.stderr)
-            else:
-                ad_image_hash = image_hash
-
-            # Per-ad URL override
             ad_url = ad_cfg.get("url") or landing_url
+            ad_cta = ad_cfg.get("cta", "LEARN_MORE")
+            creative_name = f"Creative_{ad_cfg['name']}"
 
-            creative_spec = {
-                "page_id": page_id,
-                "link_data": {
-                    "link": ad_url,
-                    "message": ad_cfg["message"],
-                    "name": ad_cfg["headline"],
-                    "image_hash": ad_image_hash,
-                    "call_to_action": {
-                        "type": ad_cfg.get("cta", "LEARN_MORE"),
-                        "value": {"link": ad_url},
+            # ── CAROUSEL ──────────────────────────────────────────────────
+            if is_carousel(ad_cfg):
+                child_attachments = []
+                for card in ad_cfg["carousel_cards"]:
+                    card_img_path = Path(card["image_path"]).expanduser()
+                    if not card_img_path.is_absolute():
+                        card_img_path = (Path.cwd() / card_img_path).resolve()
+                    card_hash = upload_image(account_id, card_img_path)
+                    state["objects"].append({"type": "image", "hash": card_hash, "file": card_img_path.name})
+                    print(f"[+] carousel image: {card_img_path.name} -> {card_hash[:16]}…", file=sys.stderr)
+                    card_url = card.get("url") or ad_url
+                    attachment: dict = {
+                        "link": card_url,
+                        "image_hash": card_hash,
+                        "name": card["headline"],
+                        "call_to_action": {"type": ad_cta, "value": {"link": card_url}},
+                    }
+                    if card.get("description"):
+                        attachment["description"] = card["description"]
+                    child_attachments.append(attachment)
+
+                carousel_spec: dict = {
+                    "page_id": page_id,
+                    "link_data": {
+                        "link": ad_url,
+                        "message": ad_cfg.get("message", ""),
+                        "call_to_action": {"type": ad_cta, "value": {"link": ad_url}},
+                        "child_attachments": child_attachments,
+                        "multi_share_end_card": ad_cfg.get("multi_share_end_card", False),
+                        "multi_share_optimized": ad_cfg.get("multi_share_optimized", True),
                     },
-                },
-            }
-            if ad_cfg.get("description"):
-                creative_spec["link_data"]["description"] = ad_cfg["description"]
-            if ig_user_id:
-                creative_spec["instagram_user_id"] = ig_user_id
+                }
+                if ig_user_id:
+                    carousel_spec["instagram_user_id"] = ig_user_id
+                creative = post(
+                    f"{account_id}/adcreatives",
+                    data={"name": creative_name, "object_story_spec": json.dumps(carousel_spec)},
+                )
 
-            creative_payload = {
-                "name": f"Creative_{ad_cfg['name']}",
-                "object_story_spec": json.dumps(creative_spec),
-            }
-            creative = post(f"{account_id}/adcreatives", data=creative_payload)
+            # ── DCO / MULTI-IMAGE (asset_feed_spec) ───────────────────────
+            else:
+                # Per-ad primary image
+                if ad_cfg.get("image_path"):
+                    per_ad_img_path = Path(ad_cfg["image_path"]).expanduser()
+                    if not per_ad_img_path.is_absolute():
+                        per_ad_img_path = (Path.cwd() / per_ad_img_path).resolve()
+                    ad_image_hash = upload_image(account_id, per_ad_img_path)
+                    state["objects"].append({"type": "image", "hash": ad_image_hash, "file": per_ad_img_path.name})
+                    print(f"[+] image: {per_ad_img_path.name} -> {ad_image_hash[:16]}…", file=sys.stderr)
+                else:
+                    ad_image_hash = image_hash
+
+                # Per-ad secondary image (9:16 for Stories/Reels)
+                secondary_image_hash = None
+                if ad_cfg.get("secondary_image_path"):
+                    sec_img_path = Path(ad_cfg["secondary_image_path"]).expanduser()
+                    if not sec_img_path.is_absolute():
+                        sec_img_path = (Path.cwd() / sec_img_path).resolve()
+                    secondary_image_hash = upload_image(account_id, sec_img_path)
+                    state["objects"].append({"type": "image", "hash": secondary_image_hash, "file": sec_img_path.name})
+                    print(f"[+] image (secondary): {sec_img_path.name} -> {secondary_image_hash[:16]}…", file=sys.stderr)
+
+                messages = ad_cfg.get("messages") or [ad_cfg.get("message", "")]
+                headlines = ad_cfg.get("headlines") or [ad_cfg.get("headline", "")]
+                use_feed_spec = secondary_image_hash or len(messages) > 1 or len(headlines) > 1
+
+                def _build_object_story_spec_payload(name: str) -> dict:
+                    creative_spec = {
+                        "page_id": page_id,
+                        "link_data": {
+                            "link": ad_url,
+                            "message": messages[0],
+                            "name": headlines[0],
+                            "image_hash": ad_image_hash,
+                            "call_to_action": {"type": ad_cta, "value": {"link": ad_url}},
+                        },
+                    }
+                    if ad_cfg.get("description"):
+                        creative_spec["link_data"]["description"] = ad_cfg["description"]
+                    if ig_user_id:
+                        creative_spec["instagram_user_id"] = ig_user_id
+                    return {"name": name, "object_story_spec": json.dumps(creative_spec)}
+
+                if use_feed_spec:
+                    images_list = [{"hash": ad_image_hash}]
+                    if secondary_image_hash:
+                        images_list.append({"hash": secondary_image_hash})
+                    feed_spec: dict = {
+                        "images": images_list,
+                        "bodies": [{"text": m} for m in messages],
+                        "titles": [{"text": h} for h in headlines],
+                        "link_urls": [{"website_url": ad_url, "display_url": ad_url}],
+                        "call_to_action_types": [ad_cta],
+                        "ad_formats": ["SINGLE_IMAGE"],
+                    }
+                    if ad_cfg.get("description"):
+                        feed_spec["descriptions"] = [{"text": ad_cfg["description"]}]
+                    asset_payload: dict = {
+                        "name": creative_name,
+                        "page_id": page_id,
+                        "asset_feed_spec": json.dumps(feed_spec),
+                    }
+                    if ig_user_id:
+                        asset_payload["instagram_user_id"] = ig_user_id
+                    try:
+                        creative = post(f"{account_id}/adcreatives", data=asset_payload)
+                    except MetaAPIError as e:
+                        if e.body.get("error", {}).get("code") == 3:
+                            print(
+                                f"[warn] asset_feed_spec not permitted — falling back to "
+                                f"object_story_spec for {ad_cfg['name']}. "
+                                f"Grant the app dynamic-creative capability in Meta Business Manager.",
+                                file=sys.stderr,
+                            )
+                            creative = post(
+                                f"{account_id}/adcreatives",
+                                data=_build_object_story_spec_payload(creative_name),
+                            )
+                        else:
+                            raise
+                else:
+                    creative = post(
+                        f"{account_id}/adcreatives",
+                        data=_build_object_story_spec_payload(creative_name),
+                    )
+
             creative_id = creative["id"]
             state["objects"].append(
-                {"type": "creative", "id": creative_id, "name": f"Creative_{ad_cfg['name']}"}
+                {"type": "creative", "id": creative_id, "name": creative_name}
             )
 
             ad = post(
